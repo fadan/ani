@@ -1,0 +1,3 @@
+WGLARB(CHOOSEPIXELFORMAT,    ChoosePixelFormat);
+WGLARB(CREATECONTEXTATTRIBS, CreateContextAttribs);
+WGLEXT(SWAPINTERVAL,         SwapInterval);
