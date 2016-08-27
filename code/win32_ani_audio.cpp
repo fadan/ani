@@ -7,6 +7,9 @@
 
 typedef HRESULT WINAPI DIRECTSOUNDCREATE(LPCGUID, LPDIRECTSOUND *, LPUNKNOWN);
 typedef HRESULT WINAPI DIRECTSOUNDCAPTURECREATE(LPCGUID, LPDIRECTSOUNDCAPTURE *, LPUNKNOWN);
+typedef HRESULT WINAPI DIRECTSOUNDFULLDUPLEXCREATE(LPCGUID, LPCGUID, LPCDSCBUFFERDESC, LPCDSBUFFERDESC, 
+                                                   HWND, DWORD, LPDIRECTSOUNDFULLDUPLEX *, 
+                                                   LPDIRECTSOUNDCAPTUREBUFFER *, LPDIRECTSOUNDBUFFER *, LPUNKNOWN);
 
 static LPDIRECTSOUNDBUFFER global_sound_buffer;
 static LPDIRECTSOUNDCAPTUREBUFFER global_capture_buffer;
@@ -17,8 +20,9 @@ static void win32_init_dsound(Win32Audio *audio, HWND window)
 
     if (lib)
     {
-        DIRECTSOUNDCREATE *ds_create = (DIRECTSOUNDCREATE *)GetProcAddress(lib, "DirectSoundCreate");
-        LPDIRECTSOUND ds;
+        DIRECTSOUNDFULLDUPLEXCREATE *duplex_create = (DIRECTSOUNDFULLDUPLEXCREATE *)GetProcAddress(lib, "DirectSoundFullDuplexCreate");
+        LPDIRECTSOUNDFULLDUPLEX full_duplex;
+
         WAVEFORMATEX wave_format = {0};
         wave_format.wFormatTag      = WAVE_FORMAT_PCM;
         wave_format.nChannels       = audio->num_channels;
@@ -27,64 +31,43 @@ static void win32_init_dsound(Win32Audio *audio, HWND window)
         wave_format.nBlockAlign     = wave_format.nChannels * wave_format.wBitsPerSample / 8;
         wave_format.nAvgBytesPerSec = wave_format.nSamplesPerSec * wave_format.nBlockAlign;
 
-        if (ds_create && SUCCEEDED(ds_create(0, &ds, 0)))
+        DSCEFFECTDESC effects[2] = {0};
+        effects[0].dwSize            = sizeof(DSCEFFECTDESC);
+        effects[0].dwFlags           = DSCFX_LOCSOFTWARE;
+        effects[0].guidDSCFXClass    = GUID_DSCFX_CLASS_AEC;
+        effects[0].guidDSCFXInstance = GUID_DSCFX_SYSTEM_AEC;
+
+        effects[1].dwSize            = sizeof(DSCEFFECTDESC);
+        effects[1].dwFlags           = DSCFX_LOCSOFTWARE;
+        effects[1].guidDSCFXClass    = GUID_DSCFX_CLASS_NS;
+        effects[1].guidDSCFXInstance = GUID_DSCFX_SYSTEM_NS;
+
+        DSCBUFFERDESC capture_buffer_desc = {0};
+        capture_buffer_desc.dwSize        = sizeof(capture_buffer_desc);
+        capture_buffer_desc.dwFlags       = DSCBCAPS_CTRLFX;
+        capture_buffer_desc.dwFXCount     = array_size(effects);
+        capture_buffer_desc.lpDSCFXDesc   = effects;
+        capture_buffer_desc.dwBufferBytes = audio->buffer_size;
+        capture_buffer_desc.lpwfxFormat   = &wave_format;
+
+        DSBUFFERDESC buffer_desc = {0};
+        buffer_desc.dwSize        = sizeof(buffer_desc);
+        buffer_desc.dwFlags       = DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_GLOBALFOCUS | DSBCAPS_LOCSOFTWARE;
+        buffer_desc.dwBufferBytes = audio->buffer_size;
+        buffer_desc.lpwfxFormat   = &wave_format;
+
+        if (duplex_create && SUCCEEDED(duplex_create(0, // DirectSoundCaptureEnumerate GUID, or null for default capture device
+                                                     0, // DirectSoundEnumerate GUID, or null for default render device
+                                                     &capture_buffer_desc,
+                                                     &buffer_desc,
+                                                     window,
+                                                     DSSCL_PRIORITY,
+                                                     &full_duplex,
+                                                     &global_capture_buffer,
+                                                     &global_sound_buffer,
+                                                     0)))
         {
-            if (SUCCEEDED(ds->SetCooperativeLevel(window, DSSCL_PRIORITY)))
-            {
-                LPDIRECTSOUNDBUFFER primary_buffer;
-                DSBUFFERDESC buffer_desc = {0};
-                buffer_desc.dwSize  = sizeof(buffer_desc);
-                buffer_desc.dwFlags = DSBCAPS_PRIMARYBUFFER;
-
-                if (SUCCEEDED(ds->CreateSoundBuffer(&buffer_desc, &primary_buffer, 0)))
-                {
-                    if (SUCCEEDED(primary_buffer->SetFormat(&wave_format)))
-                    {
-                        // NOTE(dan): primary buffer created
-                    }
-                }
-            }
-
-            DSBUFFERDESC buffer_desc = {0};
-            buffer_desc.dwSize        = sizeof(buffer_desc);
-            buffer_desc.dwFlags       = DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_GLOBALFOCUS;
-            buffer_desc.dwBufferBytes = audio->buffer_size;
-            buffer_desc.lpwfxFormat   = &wave_format;
-
-            if (SUCCEEDED(ds->CreateSoundBuffer(&buffer_desc, &global_sound_buffer, 0)))
-            {
-                // NOTE(dan): secondary buffer created
-            }
-        }
-
-        DIRECTSOUNDCAPTURECREATE *ds_capture_create = (DIRECTSOUNDCAPTURECREATE *)GetProcAddress(lib, "DirectSoundCaptureCreate8");
-        LPDIRECTSOUNDCAPTURE8 ds_capture;
-
-        if (ds_capture_create && SUCCEEDED(ds_capture_create(0, &ds_capture, 0)))
-        {
-            DSCEFFECTDESC effects[2] = {0};
-            effects[0].dwSize = sizeof(DSCEFFECTDESC);
-            effects[0].dwFlags = DSCFX_LOCSOFTWARE;
-            effects[0].guidDSCFXClass = GUID_DSCFX_CLASS_AEC;
-            effects[0].guidDSCFXInstance = GUID_DSCFX_MS_AEC;
-
-            effects[1].dwSize = sizeof(DSCEFFECTDESC);
-            effects[1].dwFlags = DSCFX_LOCSOFTWARE;
-            effects[1].guidDSCFXClass = GUID_DSCFX_CLASS_NS;
-            effects[1].guidDSCFXInstance = GUID_DSCFX_MS_NS;
-
-            DSCBUFFERDESC buffer_desc = {0};
-            buffer_desc.dwSize        = sizeof(buffer_desc);
-            buffer_desc.dwFlags       = DSCBCAPS_CTRLFX;
-            buffer_desc.dwFXCount     = array_size(effects);
-            buffer_desc.lpDSCFXDesc   = effects;
-            buffer_desc.dwBufferBytes = audio->buffer_size;
-            buffer_desc.lpwfxFormat   = &wave_format;
-
-            if (SUCCEEDED(ds_capture->CreateCaptureBuffer(&buffer_desc, &global_capture_buffer, 0)))
-            {
-                // NOTE(dan): capture buffer created
-            }
+            // NOTE(dan): capture/sound buffers created
         }
     }
 }
