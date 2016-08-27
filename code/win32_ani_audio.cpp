@@ -62,10 +62,24 @@ static void win32_init_dsound(Win32Audio *audio, HWND window)
 
         if (ds_capture_create && SUCCEEDED(ds_capture_create(0, &ds_capture, 0)))
         {
+            DSCEFFECTDESC effects[2] = {0};
+            effects[0].dwSize = sizeof(DSCEFFECTDESC);
+            effects[0].dwFlags = DSCFX_LOCSOFTWARE;
+            effects[0].guidDSCFXClass = GUID_DSCFX_CLASS_AEC;
+            effects[0].guidDSCFXInstance = GUID_DSCFX_MS_AEC;
+
+            effects[1].dwSize = sizeof(DSCEFFECTDESC);
+            effects[1].dwFlags = DSCFX_LOCSOFTWARE;
+            effects[1].guidDSCFXClass = GUID_DSCFX_CLASS_NS;
+            effects[1].guidDSCFXInstance = GUID_DSCFX_MS_NS;
+
             DSCBUFFERDESC buffer_desc = {0};
-            buffer_desc.dwSize = sizeof(buffer_desc);
+            buffer_desc.dwSize        = sizeof(buffer_desc);
+            buffer_desc.dwFlags       = DSCBCAPS_CTRLFX;
+            buffer_desc.dwFXCount     = array_size(effects);
+            buffer_desc.lpDSCFXDesc   = effects;
             buffer_desc.dwBufferBytes = audio->buffer_size;
-            buffer_desc.lpwfxFormat = &wave_format;
+            buffer_desc.lpwfxFormat   = &wave_format;
 
             if (SUCCEEDED(ds_capture->CreateCaptureBuffer(&buffer_desc, &global_capture_buffer, 0)))
             {
@@ -152,6 +166,9 @@ static void win32_update_audio(Win32State *state, Win32Audio *audio)
 
             audio->next_capture_offset += size1 + size2;
             audio->next_capture_offset %= audio->buffer_size;
+
+            assert(audio->next_capture_offset >= 0);
+            assert(audio->next_capture_offset < audio->buffer_size);
 
             global_capture_buffer->Unlock(buffer1, size1, buffer2, size2);
         }

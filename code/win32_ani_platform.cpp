@@ -6,12 +6,13 @@
     #define MEMORY_BASE_ADDRESS    (void *)0
 #endif
 
-#define PLATFORM_MEMORY_SIZE    5*MB
-#define PERMANENT_MEMORY_SIZE   5*MB
+#define PLATFORM_MEMORY_SIZE    8*MB
+#define PERMANENT_MEMORY_SIZE   8*MB
 
 #define UPDATE_HZ       60
 #define TIMESTEP_SEC    (1.0f / UPDATE_HZ)
 
+#define INITGUID
 #include "win32_ani_platform.h"
 
 static b32 global_quit;
@@ -221,7 +222,7 @@ static void win32_update_input(Win32Window *window, Input *current_input, Input 
     ScreenToClient(window->wnd, &mouse_pos);
 
     current_input->mouse_x = (f32)mouse_pos.x;
-    current_input->mouse_y = (f32)mouse_pos.y;
+    current_input->mouse_y = (f32)mouse_pos.y + 40; // TODO(dan): fix this
     current_input->mouse_z = 0;
 }
 

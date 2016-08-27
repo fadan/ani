@@ -289,49 +289,41 @@ static RECORD_AUDIO_PROC(record_audio)
 
     if (!audio_state->recording_initialized)
     {
-        sub_memchunk(&audio_state->record_memory, memchunk, 1*MB);
+        sub_memchunk(&audio_state->record_memory, memchunk, 5*MB);
         start_recording(audio_state, 2, 16, 48000);
 
         audio_state->recording_initialized = true;
     }
 
-    // TODO(dan): simplify this
     usize remaining = audio_state->record.buffer_size - audio_state->record.write_cursor;
 
     if (size1 > remaining)
     {
-        memcpy((u8 *)audio_state->record.buffer + audio_state->record.write_cursor, buffer1, remaining);
-        memcpy(audio_state->record.buffer, buffer1, size1 - remaining);
+        u8 *src1 = (u8 *)buffer1;
+        u8 *dest1 = (u8 *)audio_state ->record.buffer + audio_state->record.write_cursor;
+        usize src1_size = remaining;
 
-        audio_state->record.write_cursor = size1;
+        u8 *src2 = (u8 *)buffer1 + src1_size;
+        u8 *dest2 = (u8 *)audio_state->record.buffer;
+        usize src2_size = size1 - src1_size;
+
+        memcpy(dest1, src1, src1_size);
+        memcpy(dest2, src2, src2_size);
+
+        audio_state->record.write_cursor = (u32)src2_size;
     }
     else
     {
-        memcpy((u8 *)audio_state->record.buffer + audio_state->record.write_cursor, buffer1, size1);
+        u8 *src = (u8 *)buffer1;
+        u8 *dest = (u8 *)audio_state->record.buffer + audio_state->record.write_cursor;
+        usize size = size1;
+
+        memcpy(dest, src, size);
 
         audio_state->record.write_cursor += size1;
     }
 
-    /*
-    if (size2)
-    {
-        remaining = audio_state->record.buffer_size - audio_state->record.write_cursor;
-
-        if (size2 > remaining)
-        {
-            memcpy(buffer2, (u8 *)audio_state->record.buffer + audio_state->record.write_cursor, remaining);
-            memcpy(buffer2, audio_state->record.buffer, size2 - remaining);
-
-            audio_state->record.write_cursor = size2;
-        }
-        else
-        {
-            memcpy(buffer2, (u8 *)audio_state->record.buffer + audio_state->record.write_cursor, size2);
-
-            audio_state->record.write_cursor += size2;
-        }
-    }
-    */
+    audio_state->record.write_cursor %= audio_state->record.buffer_size;
 }
 
 static AudioStream *play_audio(AudioState *state, u16 num_channels, u16 bits_per_sample, u32 samples_per_sec, void *buffer, u32 num_samples)
@@ -368,7 +360,7 @@ static MIX_AUDIO_PROC(mix_audio)
         sub_memchunk(&state->mixer_memory, memchunk, 1*MB);
 
         #if 0
-        LoadedFile file = win32_load_file("w:\\ani\\data\\test3.wav");
+        LoadedFile file = win32_load_file("w:\\ani\\data\\test.wav");
         ParsedWav wav = parse_wav(file.contents, file.size);
 
         state->music = play_audio(state, wav.num_channels, wav.bits_per_sample, wav.samples_per_sec, 
@@ -395,34 +387,36 @@ static MIX_AUDIO_PROC(mix_audio)
         }
     }
 
-    if (state->record.streaming)
+    AudioRecord *record = &state->record;
+
+    if (record->streaming)
     {
-        u32 play_size = (state->record.write_cursor - state->record.read_cursor) % state->record.buffer_size;
-
-        if (play_size > num_samples)
-        {
-            play_size = num_samples;
-        }
-
         f32 *dest0 = channel0;
         f32 *dest1 = channel1;
 
-        for (u32 sample_index = 0; sample_index < play_size; ++sample_index)
+        u32 record_size = (record->write_cursor - record->read_cursor) % record->buffer_size;
+        u32 record_samples = record_size / (record->num_channels * (record->bits_per_sample / 8));
+
+        if (record_samples > num_samples)
         {
-            u32 source_index = (state->record.read_cursor + sample_index) % state->record.buffer_size;
-            i16 *source = (i16 *)((u32 *)state->record.buffer + source_index);
-
-            if (*source)
-            {
-                int blockhere = 1;
-            }
-
-            *dest0++ = *source++;
-            *dest1++ = *source++;
+            record_samples = num_samples;
         }
 
-        state->record.read_cursor += play_size;
-        state->record.read_cursor %= state->record.buffer_size;
+        for (u32 sample_index = 0; sample_index < record_samples; ++sample_index)
+        {
+            u32 index = (record->read_cursor/4 + sample_index) % (record->buffer_size/4);
+            assert(index < record->buffer_size/4);
+
+            i32 *source = (i32 *)record->buffer + index;
+            i16 *sample = (i16 *)source;
+
+            *dest0++ = *sample++;
+            *dest1++ = *sample++;
+            
+            record->read_cursor %= record->buffer_size;
+        }
+
+        record->read_cursor += record_samples*4;
     }
 
     #if 0
@@ -430,7 +424,6 @@ static MIX_AUDIO_PROC(mix_audio)
     for (AudioStream **stream_ptr = &state->first; *stream_ptr; )
     {
         AudioStream *stream = *stream_ptr;
-        b32 finished = false;
 
         f32 *dest0 = channel0;
         f32 *dest1 = channel1;
@@ -465,6 +458,7 @@ static MIX_AUDIO_PROC(mix_audio)
         }
     }
     #endif
+
     // NOTE(dan): fill the audio buffer with the result
     {
         f32 *source0 = channel0;
