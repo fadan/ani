@@ -35,12 +35,12 @@ static void win32_init_dsound(Win32Audio *audio, HWND window)
         effects[0].dwSize            = sizeof(DSCEFFECTDESC);
         effects[0].dwFlags           = DSCFX_LOCSOFTWARE;
         effects[0].guidDSCFXClass    = GUID_DSCFX_CLASS_AEC;
-        effects[0].guidDSCFXInstance = GUID_DSCFX_SYSTEM_AEC;
+        effects[0].guidDSCFXInstance = GUID_DSCFX_MS_AEC;
 
         effects[1].dwSize            = sizeof(DSCEFFECTDESC);
         effects[1].dwFlags           = DSCFX_LOCSOFTWARE;
         effects[1].guidDSCFXClass    = GUID_DSCFX_CLASS_NS;
-        effects[1].guidDSCFXInstance = GUID_DSCFX_SYSTEM_NS;
+        effects[1].guidDSCFXInstance = GUID_DSCFX_MS_NS;
 
         DSCBUFFERDESC capture_buffer_desc = {0};
         capture_buffer_desc.dwSize        = sizeof(capture_buffer_desc);
@@ -145,7 +145,23 @@ static void win32_update_audio(Win32State *state, Win32Audio *audio)
 
         if (SUCCEEDED(global_capture_buffer->Lock(audio->next_capture_offset, lock_size, &buffer1, &size1, &buffer2, &size2, 0)))
         {
-            state->record_audio(&state->permanent_memory, buffer1, size1, buffer2, size2);
+            TempMemchunk temp = begin_temp_memchunk(&state->platform_memory);
+            void *buffer = buffer1;
+
+            // NOTE(dan): push the 2 buffer in a temp memory, so the api dont have to know about 2 buffers
+            if (size2 > 0)
+            {
+                // TODO(dan): why does ds give us 2 buffers if the 2nd is always empty?
+                // TODO(dan): make sure that size2 is never > 0, then this can go away
+                buffer = push_copy(temp.memchunk, size1, buffer1, align_no_clear(4));
+                if (size2)
+                {
+                    push_copy(temp.memchunk, size2, buffer2, align_no_clear(4));
+                }
+            }
+
+            state->record_audio(&state->permanent_memory, buffer, size1 + size2);
+            end_temp_memchunk(temp);
 
             audio->next_capture_offset += size1 + size2;
             audio->next_capture_offset %= audio->buffer_size;
@@ -158,8 +174,8 @@ static void win32_update_audio(Win32State *state, Win32Audio *audio)
     }
 
     // NOTE(dan): playback
-    ulong play_cursor, write_cursor;
 
+    ulong play_cursor, write_cursor;
     if (SUCCEEDED(global_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor)))
     {
         ulong lock_offset = (audio->samples_played * audio->block_size) % audio->buffer_size;

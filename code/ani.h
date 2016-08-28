@@ -47,5 +47,12 @@ struct AudioState
     AudioStream *first_free;
 };
 
+struct PermanentState
+{
+    AudioState audio_state;
+
+    b32 initialized;
+};
+
 #define ANI_H
 #endif
