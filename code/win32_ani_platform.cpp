@@ -223,7 +223,7 @@ static void win32_update_input(Win32Window *window, Input *current_input, Input 
 
     current_input->mouse_x = (f32)mouse_pos.x;
     current_input->mouse_y = (f32)mouse_pos.y + 40; // TODO(dan): fix this
-    current_input->mouse_z = 0;
+    //current_input->mouse_z = 0;
 }
 
 int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_show)

@@ -1,5 +1,6 @@
 #ifndef ANI_H
 
+#include <intrin.h>
 #include "ani_math.h"
 
 #if 0
@@ -41,7 +42,7 @@ struct AudioRecord
 struct AudioState
 {
     b32 recording_initialized;
-    b32 playback_initialized;
+    b32 mixer_initialized;
 
     Memchunk record_memory;
     Memchunk mixer_memory;
@@ -63,6 +64,8 @@ struct AudioState
 struct PermanentState
 {
     AudioState audio_state;
+
+    bool playback_mic;
 
     b32 initialized;
 };
