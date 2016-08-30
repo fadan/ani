@@ -1,7 +1,6 @@
 @echo off
 
 set projdir=w:\ani
-set cpllock=compiler.lock
 
 if not exist %projdir%\build mkdir %projdir%\build
 pushd %projdir%\build
@@ -53,11 +52,6 @@ set linkflags=-nologo -incremental:no -opt:ref
 :: Build
 ::
 
-del *.pdb > NUL 2> NUL
-echo "Waiting for compiler..." > %cpllock%
-
-cl %cplflags% -Od %projdir%\code\win32_ani_platform.cpp -link %linkflags% user32.lib opengl32.lib gdi32.lib
-
-del %cpllock%
+cl %cplflags% %projdir%\code\win32_ani_platform.cpp -link %linkflags% user32.lib opengl32.lib gdi32.lib
 
 popd

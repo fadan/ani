@@ -151,37 +151,41 @@ static MIX_AUDIO_PROC(mix_audio)
     {
         sub_memchunk(&state->mixer_memory, memchunk, 1*MB);
 
-        state->master_volume[0] = state->master_volume[1] = 1.0f;
+        state->master_volume[0] = 1.0f;
+        state->master_volume[1] = 1.0f;
 
         state->mixer_initialized = true;
     }
 
     TempMemchunk mixer_memory = begin_temp_memchunk(&state->mixer_memory);
 
-    // NOTE(dan): enable this for the SIMD version of the mixer
-    #if 1
+    #if 1 
+    // NOTE(dan): SIMD version of the mixer
 
-    u32 sample_count = num_samples / 4;
+    assert(output_num_samples % 4 == 0);
+    u32 sample_chunk_count = output_num_samples / 4;
 
-    __m128 *channel0 = push_array(&state->mixer_memory, sample_count, __m128, align_no_clear(16));
-    __m128 *channel1 = push_array(&state->mixer_memory, sample_count, __m128, align_no_clear(16));
+    __m128 *mixer_channel0 = push_array(&state->mixer_memory, sample_chunk_count, __m128, align_no_clear(16));
+    __m128 *mixer_channel1 = push_array(&state->mixer_memory, sample_chunk_count, __m128, align_no_clear(16));
 
     // NOTE(dan): clear audio buffer
     {
-        __m128 *dest0 = channel0;
-        __m128 *dest1 = channel1;
+        __m128 *dest0 = mixer_channel0;
+        __m128 *dest1 = mixer_channel1;
         __m128 zero = _mm_setzero_ps();
 
-        for (u32 sample_index = 0; sample_index < sample_count; ++sample_index)
+        for (u32 sample_index = 0; sample_index < sample_chunk_count; ++sample_index)
         {
-            // NOTE(dan): setting the mixer buffer values to zero
             _mm_store_ps((f32 *)dest0++, zero);
             _mm_store_ps((f32 *)dest1++, zero);
         }
     }
 
-    // NOTE(dan): mixing 
+    // NOTE(dan): mixer main loop
     {       
+        __m128 master_volume0 = _mm_set1_ps(state->master_volume[0]);
+        __m128 master_volume1 = _mm_set1_ps(state->master_volume[1]);
+
         for (AudioRecord *record = state->first_record; record; record = record->next)
         {
             if (record == state->local_record && !permanent_state->playback_mic)
@@ -191,37 +195,35 @@ static MIX_AUDIO_PROC(mix_audio)
 
             if (record->want_playback)
             {
-                // NOTE(dan): volume values of channel 0
-                __m128 *dest0 = channel0;
-                __m128 master_volume0 = _mm_set1_ps(state->master_volume[0]);
-                __m128 volume0 = _mm_set1_ps(record->volume[0]);
-                
-                // NOTE(dan): volume values of channel 1
-                __m128 *dest1 = channel1;
-                __m128 master_volume1 = _mm_set1_ps(state->master_volume[1]);
-                __m128 volume1 = _mm_set1_ps(record->volume[1]);
-
+                u32 bytes_per_sample = record->num_channels * (record->bits_per_sample / 8);
                 u32 record_size = (record->write_cursor - record->read_cursor) % record->buffer_size;
-                u32 record_samples = record_size / (record->num_channels * (record->bits_per_sample / 8));
+                u32 record_samples = record_size / bytes_per_sample;
 
-                if (record_samples > num_samples)
+                if (record_samples > output_num_samples)
                 {
-                    record_samples = num_samples;
+                    record_samples = output_num_samples;
                 }
 
-                i32 *buffer32 = (i32 *)record->buffer;
-                u32 read_byte = record->read_cursor/4;
-                u32 buffer_bytes = (u32)record->buffer_size/4;
+                i32 *source = (i32 *)record->buffer;
+                u32 read_byte = record->read_cursor / bytes_per_sample;
+                u32 buffer_bytes = (u32)record->buffer_size / bytes_per_sample;
 
-                __m128 zero = _mm_setzero_ps();
+                __m128 *dest0 = mixer_channel0;
+                __m128 *dest1 = mixer_channel1;
+             
+                __m128 volume0 = _mm_set1_ps(record->volume[0]);
+                __m128 volume1 = _mm_set1_ps(record->volume[1]);
 
-                for (u32 sample_index = 0; sample_index < record_samples/4; ++sample_index)
+                volume0 = _mm_mul_ps(master_volume0, volume0);
+                volume1 = _mm_mul_ps(master_volume1, volume1);
+
+                for (u32 sample_chunk_index = 0; sample_chunk_index < record_samples/4; ++sample_chunk_index)
                 {
-                    u32 index = (record->read_cursor/4 + sample_index*4) % (record->buffer_size/4);
-                    assert(index < record->buffer_size/4);
+                    u32 source_index = (read_byte + sample_chunk_index * 4) % buffer_bytes;
+                    assert(source_index < buffer_bytes);
                     
                     // NOTE(dan): load the samples as packed pairs of 16bit ints
-                    __m128i sample_x4 = _mm_load_si128((__m128i *)(buffer32 + index));
+                    __m128i sample_x4 = _mm_load_si128((__m128i *)(source + source_index));
 
                     // NOTE(dan): extract packed 16 bit pairs to separate 32bit packed floats
                     __m128 c0 = _mm_cvtepi32_ps(_mm_srai_epi32(sample_x4, 16));
@@ -232,26 +234,27 @@ static MIX_AUDIO_PROC(mix_audio)
                     __m128 d1 = _mm_load_ps((f32 *)dest1);
 
                     // NOTE(dan): apply the volume
-                    d0 = _mm_add_ps(d0, _mm_mul_ps(_mm_mul_ps(master_volume0, volume0), c0));
-                    d1 = _mm_add_ps(d1, _mm_mul_ps(_mm_mul_ps(master_volume1, volume1), c1));
+                    d0 = _mm_add_ps(d0, _mm_mul_ps(volume0, c0));
+                    d1 = _mm_add_ps(d1, _mm_mul_ps(volume1, c1));
 
                     // NOTE(dan): store back the values into mixer buffer
                     _mm_store_ps((f32 *)dest0++, d0);
                     _mm_store_ps((f32 *)dest1++, d1);
                 }
 
-                record->read_cursor += record_samples*4 % buffer_bytes;
+                record->read_cursor += record_samples*4;
+                record->read_cursor %= record->buffer_size;
             }
         }
     }
 
     // NOTE(dan): store the mixed result
     {
-        __m128 *src0 = channel0;
-        __m128 *src1 = channel1;
-        __m128i *dest = (__m128i *)buffer;
+        __m128 *src0 = mixer_channel0;
+        __m128 *src1 = mixer_channel1;
+        __m128i *dest = (__m128i *)output_buffer;
 
-        for (u32 sample_index = 0; sample_index < sample_count; ++sample_index)
+        for (u32 sample_index = 0; sample_index < sample_chunk_count; ++sample_index)
         {
             // NOTE(dan): load channel values in
             __m128 s0 = _mm_load_ps((f32 *)src0++);
@@ -274,13 +277,13 @@ static MIX_AUDIO_PROC(mix_audio)
 
     // NOTE(dan): scalar version of the sound mixer
 
-    f32 *channel0 = push_array(&state->mixer_memory, num_samples, f32, align_no_clear(16));
-    f32 *channel1 = push_array(&state->mixer_memory, num_samples, f32, align_no_clear(16));
+    f32 *mixer_channel0 = push_array(&state->mixer_memory, num_samples, f32, align_no_clear(16));
+    f32 *mixer_channel1 = push_array(&state->mixer_memory, num_samples, f32, align_no_clear(16));
 
     // NOTE(dan): clear audio buffer
     {
-        f32 *dest0 = channel0;
-        f32 *dest1 = channel1;
+        f32 *dest0 = mixer_channel0;
+        f32 *dest1 = mixer_channel1;
 
         for (u32 sample_index = 0; sample_index < num_samples; ++sample_index)
         {
@@ -387,5 +390,4 @@ static MIX_AUDIO_PROC(mix_audio)
     #endif
 
     end_temp_memchunk(mixer_memory);
-    clear_memchunk(&state->record_memory);
 }
