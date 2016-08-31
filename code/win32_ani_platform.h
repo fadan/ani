@@ -4,6 +4,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include "windows.h"
 
+#include <winsock2.h>
+
 struct Win32Window
 {
     char    *title;
@@ -29,6 +31,13 @@ struct Win32Audio
     void *buffer;
 
     u32 next_capture_offset;
+};
+
+struct Win32Net
+{
+    u16 listen_port;
+
+    SOCKET socket;
 };
 
 struct Win32State
@@ -91,6 +100,7 @@ inline u32 win32_truncate_uint64(u64 value)
 
 #include "win32_ani_file.cpp"
 #include "win32_ani_audio.cpp"
+#include "win32_ani_net.cpp"
 #include "ani.cpp"
 
 #define WIN32_ANI_PLATFORM_H

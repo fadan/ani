@@ -52,6 +52,6 @@ set linkflags=-nologo -incremental:no -opt:ref
 :: Build
 ::
 
-cl %cplflags% %projdir%\code\win32_ani_platform.cpp -link %linkflags% user32.lib opengl32.lib gdi32.lib
+cl %cplflags% %projdir%\code\win32_ani_platform.cpp -link %linkflags% user32.lib opengl32.lib gdi32.lib wsock32.lib
 
 popd

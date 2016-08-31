@@ -223,7 +223,6 @@ static void win32_update_input(Win32Window *window, Input *current_input, Input 
 
     current_input->mouse_x = (f32)mouse_pos.x;
     current_input->mouse_y = (f32)mouse_pos.y + 40; // TODO(dan): fix this
-    //current_input->mouse_z = 0;
 }
 
 int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_show)
@@ -247,7 +246,11 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
     audio.samples_per_sec = 48000;
     win32_init_audio(&audio, window.wnd);
 
-    Input inputs[2] = {};
+    Win32Net net = {0};
+    net.listen_port = 6969;
+    win32_init_net(&net);
+
+    Input inputs[2] = {0};
     Input *current_input = &inputs[0];
     Input *previous_input = &inputs[1];
 
@@ -257,6 +260,9 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
         f32 time = 0;
 
         win32_agl_set_interval(1);
+
+        char *data = "asdf";
+        win32_net_send(&net, ADDRESS(127, 0, 0, 1), net.listen_port, data, sizeof(data));
 
         while (!global_quit)
         {
@@ -269,6 +275,14 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
             while (carried_dt > TIMESTEP_SEC)
             {
                 carried_dt -= TIMESTEP_SEC;
+
+                u8 buffer[256];
+
+                Win32NetPacket packet = win32_net_receive(&net, &buffer, sizeof(buffer));
+                if (packet.received_bytes > 0)
+                {
+                    int breakhere = 1;
+                }
 
                 win32_update_input(&window, current_input, previous_input);              
                 win32_update_audio(&state, &audio);
@@ -288,4 +302,6 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
             }
         }
     }
+
+    win32_net_close(&net);
 }
