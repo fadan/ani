@@ -8,6 +8,7 @@
 
 #define invalid_codepath        assert(!"invalid codepath")
 #define invalid_default_case    default: { invalid_codepath; } break
+#define invalid_else            else { invalid_codepath; }
 
 #define array_size(a) (sizeof(a) / sizeof((a)[0]))
 #define offset_of(type, element) ((usize)&(((type *)0)->element))

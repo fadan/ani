@@ -227,6 +227,8 @@ static void win32_update_input(Win32Window *window, Input *current_input, Input 
 
 int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_show)
 {
+    win32_init_net();
+
     Win32State state = {0};
     state.mix_audio         = mix_audio;
     state.record_audio      = record_audio;
@@ -246,13 +248,29 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
     audio.samples_per_sec = 48000;
     win32_init_audio(&audio, window.wnd);
 
-    Win32Net net = {0};
-    net.listen_port = 6969;
-    win32_init_net(&net);
-
     Input inputs[2] = {0};
     Input *current_input = &inputs[0];
     Input *previous_input = &inputs[1];
+
+    i16 server_port = 30000;
+    i16 client_port = 30001;
+    i32 protocol_id = 0x99887766;
+    f32 timeout_secs = 10.0f;
+
+    Win32Connection server = {0};
+    server.socket       = win32_create_socket(server_port);
+    server.state        = ConnectionState_Listening;
+    server.protocol_id  = protocol_id;
+    server.timeout_secs = timeout_secs;
+    server.is_server    = true;
+
+    Win32Connection client = {0};
+    client.socket       = win32_create_socket(client_port);
+    client.state        = ConnectionState_Connecting;
+    client.protocol_id  = protocol_id;
+    client.timeout_secs = timeout_secs;
+    client.ip           = IPV4_TO_U32(127, 0, 0, 1);
+    client.port         = server_port;
 
     if (window.context_initialized && state.initialized)
     {
@@ -260,9 +278,6 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
         f32 time = 0;
 
         win32_agl_set_interval(1);
-
-        char *data = "asdf";
-        win32_net_send(&net, ADDRESS(127, 0, 0, 1), net.listen_port, data, sizeof(data));
 
         while (!global_quit)
         {
@@ -276,12 +291,38 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
             {
                 carried_dt -= TIMESTEP_SEC;
 
-                u8 buffer[256];
-
-                Win32NetPacket packet = win32_net_receive(&net, &buffer, sizeof(buffer));
-                if (packet.received_bytes > 0)
+                // NOTE(dan): test connection
                 {
-                    int breakhere = 1;
+                    if (client.state == ConnectionState_Connected && server.state == ConnectionState_Connected)
+                    {
+                        int breakhere = 1;
+                    }
+
+                    if (client.state == ConnectionState_ConnectionFailed)
+                    {
+                        int breakhere = 2;
+                    }
+
+                    char client_packet[] = "client to server";
+                    win32_send_packet(&state.platform_memory, &client, client_packet, array_size(client_packet));
+
+                    char server_packet[] = "server to client";
+                    win32_send_packet(&state.platform_memory, &server, server_packet, array_size(server_packet));
+
+                    char packet[256];
+                    i32 packet_size;
+                    while (0 < (packet_size = win32_receive_packet(&state.platform_memory, &client, packet, sizeof(packet))))
+                    {
+                        int breakhere = 3;
+                    }
+
+                    while (0 < (packet_size = win32_receive_packet(&state.platform_memory, &server, packet, sizeof(packet))))
+                    {
+                        int breakhere = 4;
+                    }
+
+                    win32_update_connection(&client, TIMESTEP_SEC);
+                    win32_update_connection(&server, TIMESTEP_SEC);
                 }
 
                 win32_update_input(&window, current_input, previous_input);              
@@ -303,5 +344,5 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
         }
     }
 
-    win32_net_close(&net);
+    win32_shutdown_net();
 }
