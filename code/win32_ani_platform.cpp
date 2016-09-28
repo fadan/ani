@@ -12,7 +12,6 @@
 #define UPDATE_HZ       60
 #define TIMESTEP_SEC    (1.0f / UPDATE_HZ)
 
-#define INITGUID
 #include "win32_ani_platform.h"
 
 static b32 global_quit;
@@ -225,9 +224,20 @@ static void win32_update_input(Win32Window *window, Input *current_input, Input 
     current_input->mouse_y = (f32)mouse_pos.y + 40; // TODO(dan): fix this
 }
 
+void ods(char *fmt, ...)
+{
+   char buffer[1000];
+   va_list va;
+   va_start(va, fmt);
+   vsprintf(buffer, fmt, va);
+   va_end(va);
+
+   OutputDebugString(buffer);
+}
+
 int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_show)
 {
-    win32_init_net();
+    // win32_init_net();
 
     Win32State state = {0};
     state.mix_audio         = mix_audio;
@@ -252,25 +262,46 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
     Input *current_input = &inputs[0];
     Input *previous_input = &inputs[1];
 
-    i16 server_port = 30000;
-    i16 client_port = 30001;
-    i32 protocol_id = 0x99887766;
-    f32 timeout_secs = 10.0f;
+    #define SERVER_IP       IPV4_TO_U32(127, 0, 0, 1)
+    #define SERVER_PORT     30000
+    #define CLIENT_PORT     30001
 
-    Win32Connection server = {0};
-    server.socket       = win32_create_socket(server_port);
-    server.state        = ConnectionState_Listening;
-    server.protocol_id  = protocol_id;
-    server.timeout_secs = timeout_secs;
-    server.is_server    = true;
+    PlatformSocketsApi sockets = win32_get_sockets_api();
 
-    Win32Connection client = {0};
-    client.socket       = win32_create_socket(client_port);
-    client.state        = ConnectionState_Connecting;
-    client.protocol_id  = protocol_id;
-    client.timeout_secs = timeout_secs;
-    client.ip           = IPV4_TO_U32(127, 0, 0, 1);
-    client.port         = server_port;
+    Net net = {0};
+    init_net(sockets, &net, &state.platform_memory);
+
+    Connection server = {0};
+    init_server_connection(&server, SERVER_PORT);
+    
+    Connection client = {0};
+    init_client_connection(&client, CLIENT_PORT, SERVER_IP, SERVER_PORT);
+
+    // i16 server_port = 30000;
+    // i16 client_port = 30001;
+    // i32 protocol_id = 0x11112222;
+    // f32 timeout_secs = 1.0f;
+
+    // Win32Connection server = {0};
+    // server.socket       = win32_create_socket(server_port);
+    // server.state        = ConnectionState_Listening;
+    // server.protocol_id  = protocol_id;
+    // server.timeout_secs = timeout_secs;
+    // server.is_server    = true;
+
+    // Win32Connection client = {0};
+    // client.socket       = win32_create_socket(client_port);
+    // client.state        = ConnectionState_Connecting;
+    // client.protocol_id  = protocol_id;
+    // client.timeout_secs = timeout_secs;
+    // client.ip           = IPV4_TO_U32(127, 0, 0, 1);
+    // client.port         = server_port;
+
+    // Net net_;
+    // Net *net = &net_;
+    // init_net(net);
+
+    //
 
     if (window.context_initialized && state.initialized)
     {
@@ -291,7 +322,8 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
             {
                 carried_dt -= TIMESTEP_SEC;
 
-                // NOTE(dan): test connection
+                //
+
                 {
                     if (client.state == ConnectionState_Connected && server.state == ConnectionState_Connected)
                     {
@@ -304,26 +336,33 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
                     }
 
                     char client_packet[] = "client to server";
-                    win32_send_packet(&state.platform_memory, &client, client_packet, array_size(client_packet));
+                    // send_packet(&state.platform_memory, net, &client, client_packet, array_size(client_packet));
+                    send_packet(&net, &client, client_packet, array_size(client_packet));
 
                     char server_packet[] = "server to client";
-                    win32_send_packet(&state.platform_memory, &server, server_packet, array_size(server_packet));
+                    // send_packet(&state.platform_memory, net, &server, server_packet, array_size(server_packet));
+                    send_packet(&net, &server, server_packet, array_size(server_packet));
+
 
                     char packet[256];
                     i32 packet_size;
-                    while (0 < (packet_size = win32_receive_packet(&state.platform_memory, &client, packet, sizeof(packet))))
+                    // while (0 < (packet_size = recv_packet(net, &state.platform_memory, &client, packet, sizeof(packet))))
+                    while (0 < (packet_size = recv_packet(&net, &client, packet, sizeof(packet))))
                     {
                         int breakhere = 3;
                     }
 
-                    while (0 < (packet_size = win32_receive_packet(&state.platform_memory, &server, packet, sizeof(packet))))
+                    // while (0 < (packet_size = recv_packet(net, &state.platform_memory, &server, packet, sizeof(packet))))
+                    while (0 < (packet_size = recv_packet(&net, &server, packet, sizeof(packet))))
                     {
                         int breakhere = 4;
                     }
 
-                    win32_update_connection(&client, TIMESTEP_SEC);
-                    win32_update_connection(&server, TIMESTEP_SEC);
+                    update_connection(&net, &client, TIMESTEP_SEC);
+                    update_connection(&net, &server, TIMESTEP_SEC);
                 }
+
+                //
 
                 win32_update_input(&window, current_input, previous_input);              
                 win32_update_audio(&state, &audio);
@@ -344,5 +383,6 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
         }
     }
 
-    win32_shutdown_net();
+    shutdown_net(&net);
+    // win32_shutdown_net();
 }
