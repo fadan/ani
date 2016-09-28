@@ -237,8 +237,6 @@ void ods(char *fmt, ...)
 
 int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_show)
 {
-    // win32_init_net();
-
     Win32State state = {0};
     state.mix_audio         = mix_audio;
     state.record_audio      = record_audio;
@@ -277,32 +275,6 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
     Connection client = {0};
     init_client_connection(&client, CLIENT_PORT, SERVER_IP, SERVER_PORT);
 
-    // i16 server_port = 30000;
-    // i16 client_port = 30001;
-    // i32 protocol_id = 0x11112222;
-    // f32 timeout_secs = 1.0f;
-
-    // Win32Connection server = {0};
-    // server.socket       = win32_create_socket(server_port);
-    // server.state        = ConnectionState_Listening;
-    // server.protocol_id  = protocol_id;
-    // server.timeout_secs = timeout_secs;
-    // server.is_server    = true;
-
-    // Win32Connection client = {0};
-    // client.socket       = win32_create_socket(client_port);
-    // client.state        = ConnectionState_Connecting;
-    // client.protocol_id  = protocol_id;
-    // client.timeout_secs = timeout_secs;
-    // client.ip           = IPV4_TO_U32(127, 0, 0, 1);
-    // client.port         = server_port;
-
-    // Net net_;
-    // Net *net = &net_;
-    // init_net(net);
-
-    //
-
     if (window.context_initialized && state.initialized)
     {
         f32 carried_dt = 0;
@@ -336,23 +308,19 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
                     }
 
                     char client_packet[] = "client to server";
-                    // send_packet(&state.platform_memory, net, &client, client_packet, array_size(client_packet));
                     send_packet(&net, &client, client_packet, array_size(client_packet));
 
                     char server_packet[] = "server to client";
-                    // send_packet(&state.platform_memory, net, &server, server_packet, array_size(server_packet));
                     send_packet(&net, &server, server_packet, array_size(server_packet));
 
 
                     char packet[256];
                     i32 packet_size;
-                    // while (0 < (packet_size = recv_packet(net, &state.platform_memory, &client, packet, sizeof(packet))))
                     while (0 < (packet_size = recv_packet(&net, &client, packet, sizeof(packet))))
                     {
                         int breakhere = 3;
                     }
 
-                    // while (0 < (packet_size = recv_packet(net, &state.platform_memory, &server, packet, sizeof(packet))))
                     while (0 < (packet_size = recv_packet(&net, &server, packet, sizeof(packet))))
                     {
                         int breakhere = 4;
@@ -384,5 +352,4 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
     }
 
     shutdown_net(&net);
-    // win32_shutdown_net();
 }

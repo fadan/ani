@@ -2,10 +2,6 @@
 
 #define IPV4_TO_U32(a, b, c, d)  ((a << 24) | (b << 16) | (c << 8) | (d << 0))
 
-//
-// NOTE(dan): sockets
-//
-
 #if PLATFORM == PLATFORM_WINDOWS
     typedef unsigned long Socket;
 #else
@@ -36,10 +32,6 @@ struct PlatformSocketsApi
     PlatformSocketShutdownProc   *shutdown;
 };
 
-//
-// NOTE(dan): virtual connection
-//
-
 enum ConnectionState
 {
     ConnectionState_Disconnected,
@@ -65,18 +57,49 @@ struct Connection
     f32 timeout_accum;
 };
 
-//
-// NOTE(dan): packet queue
-//
-
 struct PacketData
 {    
     PacketData *next;
     PacketData *prev;
 
+    PacketData *next_free;
+
     u32 sequence;
     f32 time;
     i32 size;    
+};
+
+#define MAX_NUM_ACKS 64
+
+struct Net
+{
+    u32 max_sequence;
+    u32 local_sequence;
+    u32 remote_sequence;
+
+    u32 sent_packets;
+    u32 recv_packets;
+    u32 lost_packets;
+    u32 acked_packets;
+
+    f32 sent_bandwidth;
+    f32 acked_bandwidth;
+    f32 rtt;
+    f32 max_rtt;
+
+    u32 num_acks;
+    u32 acks[MAX_NUM_ACKS];
+
+    Memchunk *memchunk;
+    Memchunk packet_data_memory;
+
+    PacketData *first_data;
+    PacketData *first_free_data;
+
+    PacketData *sent_queue;
+    PacketData *recv_queue;
+    PacketData *acked_queue;
+    PacketData *pending_ack_queue;
 };
 
 inline b32 sequence_more_recent(u32 sequence1, u32 sequence2, u32 max_sequence)
@@ -101,23 +124,37 @@ inline b32 sequence_exists(PacketData *queue, u32 sequence)
     return result;
 }   
 
-// TODO(dan): remove this
-#include <malloc.h>
-
-inline PacketData *allocate_packet_data()
+inline PacketData *allocate_packet_data(Net *net)
 {
-    // TODO(dan): replace malloc with a free list
-    PacketData *data = (PacketData *)malloc(sizeof(*data));
+    if (!net->first_free_data)
+    {
+        net->first_free_data = push_struct(&net->packet_data_memory, PacketData);
+        net->first_free_data->next_free = 0;
+    }
+
+    PacketData *data = net->first_free_data;
+    net->first_free_data = data->next_free;
+
     *data = {0};
     data->next = data;
     data->prev = data;
+    
+    data->next_free = net->first_data;
+    net->first_data = data;
     return data;
 }
 
-inline void packet_data_insert_before(PacketData *node, u32 sequence, f32 time, i32 size)
+inline void packet_data_insert_before(Net *net, PacketData *node, u32 sequence, f32 time, i32 size)
 {
-    // TODO(dan): replace malloc with a free list
-    PacketData *new_node = (PacketData *)malloc(sizeof(*new_node));
+    if (!net->first_free_data)
+    {
+        net->first_free_data = push_struct(&net->packet_data_memory, PacketData);
+        net->first_free_data->next_free = 0;
+    }
+
+    PacketData *new_node = net->first_free_data;
+    net->first_free_data = new_node->next_free;
+
     *new_node = {0};
     new_node->sequence = sequence;
     new_node->time = time;
@@ -127,27 +164,34 @@ inline void packet_data_insert_before(PacketData *node, u32 sequence, f32 time, 
     new_node->prev = node->prev;
     new_node->next->prev = new_node;
     new_node->prev->next = new_node;
+
+    new_node->next_free = net->first_data;
+    net->first_data = new_node;
 }
 
-inline void packet_data_delete_node(PacketData *node)
+inline void packet_data_delete_node(Net *net, PacketData *node)
 {
     node->next->prev = node->prev;
     node->prev->next = node->next;
-    free(node);
+
+    node->next_free = net->first_free_data;
+    net->first_free_data = node;
 }
 
-inline void packet_data_clear(PacketData *data)
+inline void packet_data_clear(Net *net, PacketData *data)
 {
     while (data->next != data)
     {
-        packet_data_delete_node(data->next);
+        packet_data_delete_node(net, data->next);
     }
 }
 
-inline void packet_data_delete(PacketData *data)
+inline void packet_data_delete(Net *net, PacketData *data)
 {
-    packet_data_clear(data);
-    free(data);
+    packet_data_clear(net, data);
+
+    data->next_free = net->first_free_data;
+    net->first_free_data = data;
 }
 
 inline b32 packet_data_empty(PacketData *data)
@@ -166,21 +210,21 @@ inline u32 packet_data_size(PacketData *data)
     return size;
 }
 
-static void packet_data_insert_sorted(PacketData *queue, u32 max_sequence, u32 sequence, f32 time, i32 size)
+inline void packet_data_insert_sorted(Net *net, PacketData *queue, u32 max_sequence, u32 sequence, f32 time, i32 size)
 {
     if (packet_data_empty(queue))
     {
-        packet_data_insert_before(queue, sequence, time, size);
+        packet_data_insert_before(net, queue, sequence, time, size);
     }
     else
     {
         if (!sequence_more_recent(sequence, queue->next->sequence, max_sequence))
         {
-            packet_data_insert_before(queue->next, sequence, time, size);
+            packet_data_insert_before(net, queue->next, sequence, time, size);
         }
         else if (sequence_more_recent(sequence, queue->prev->sequence, max_sequence))
         {
-            packet_data_insert_before(queue, sequence, time, size);
+            packet_data_insert_before(net, queue, sequence, time, size);
         }
         else
         {
@@ -189,7 +233,7 @@ static void packet_data_insert_sorted(PacketData *queue, u32 max_sequence, u32 s
                 assert(node->sequence != sequence);
                 if (sequence_more_recent(node->sequence, sequence, max_sequence))
                 {
-                    packet_data_insert_before(node, sequence, time, size);
+                    packet_data_insert_before(net, node, sequence, time, size);
                     break;
                 }
             }
@@ -208,35 +252,6 @@ inline void packet_data_verify_sorted(PacketData *queue, u32 max_sequence)
         }
     }
 }
-
-#define MAX_NUM_ACKS 64
-
-struct Net
-{
-    u32 max_sequence;
-    u32 local_sequence;
-    u32 remote_sequence;
-
-    u32 sent_packets;
-    u32 recv_packets;
-    u32 lost_packets;
-    u32 acked_packets;
-
-    f32 sent_bandwidth;
-    f32 acked_bandwidth;
-    f32 rtt;
-    f32 max_rtt;
-
-    u32 num_acks;
-    u32 acks[MAX_NUM_ACKS];
-
-    Memchunk *memchunk;
-
-    PacketData *sent_queue;
-    PacketData *recv_queue;
-    PacketData *acked_queue;
-    PacketData *pending_ack_queue;
-};
 
 #define ANI_NET_H
 #endif
