@@ -61,14 +61,17 @@ struct AudioState
     #endif
 };
 
-struct PermanentState
+struct ProgramState
 {
     AudioState audio_state;
+    NetworkState network_state;
 
     bool playback_mic;
 
     b32 initialized;
 };
+
+static Platform platform;
 
 #define ANI_H
 #endif

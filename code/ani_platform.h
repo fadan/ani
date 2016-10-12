@@ -23,9 +23,24 @@
 #include "ani_input.h"
 #include "ani_net.h"
 
-#define UPDATE_AND_RENDER_PROC(name)    void name(Memchunk *memchunk, Input *input, i32 window_width, i32 window_height)
-#define RECORD_AUDIO_PROC(name)         void name(Memchunk *memchunk, void *buffer, u32 size)
-#define MIX_AUDIO_PROC(name)            void name(Memchunk *memchunk, u16 num_channels, u16 bits_per_sample, u32 samples_per_sec, void *output_buffer, u32 output_num_samples)
+struct Platform
+{
+    PlatformSocketCreateUDPProc  *socket_create_udp;
+    PlatformSocketSendProc       *socket_send;
+    PlatformSocketRecvProc       *socket_recv;
+    PlatformSocketCloseProc      *socket_close;
+};
+
+struct ProgramMemory
+{
+    Memchunk memchunk;
+
+    Platform platform;
+};
+
+#define UPDATE_AND_RENDER_PROC(name)    void name(ProgramMemory *memory, Input *input, i32 window_width, i32 window_height)
+#define RECORD_AUDIO_PROC(name)         void name(ProgramMemory *memory, void *buffer, u32 size)
+#define MIX_AUDIO_PROC(name)            void name(ProgramMemory *memory, u16 num_channels, u16 bits_per_sample, u32 samples_per_sec, void *output_buffer, u32 output_num_samples)
 
 typedef UPDATE_AND_RENDER_PROC(UpdateAndRenderProc);
 typedef RECORD_AUDIO_PROC(RecordAudioProc);

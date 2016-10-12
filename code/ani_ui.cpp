@@ -1,9 +1,13 @@
 #define IMGUI_DISABLE_INCLUDE_IMCONFIG_H
+
+#pragma warning(push)
+#pragma warning(disable: 4459)
 #include "imgui.h"
 
 #include "imgui_demo.cpp"
 #include "imgui_draw.cpp"
 #include "imgui.cpp"
+#pragma warning(pop)
 
 #define SHADER_VERSION "#version 330\n"
 
@@ -61,7 +65,7 @@ enum
 GLint attribs[attrib_count];
 GLint uniforms[uniform_count];
 
-GLuint program;
+GLuint ui_program;
 
 GLuint vbo;
 GLuint vao;
@@ -90,16 +94,16 @@ static void init_ui()
     io->Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 
     char error[1024];
-    program = agl_create(vertex_shader, fragment_shader, error, sizeof(error));
-    assert(program);
+    ui_program = agl_create(vertex_shader, fragment_shader, error, sizeof(error));
+    assert(ui_program);
 
-    attribs[attrib_pos] = agl_get_attrib_location(program, "pos");
-    attribs[attrib_uv] = agl_get_attrib_location(program, "uv");
-    attribs[attrib_color] = agl_get_attrib_location(program, "color");
+    attribs[attrib_pos] = agl_get_attrib_location(ui_program, "pos");
+    attribs[attrib_uv] = agl_get_attrib_location(ui_program, "uv");
+    attribs[attrib_color] = agl_get_attrib_location(ui_program, "color");
     check_bindings(attribs, attrib_count);
 
-    uniforms[uniform_tex] = agl_get_uniform_location(program, "tex");
-    uniforms[uniform_proj_mat] = agl_get_uniform_location(program, "proj_mat");
+    uniforms[uniform_tex] = agl_get_uniform_location(ui_program, "tex");
+    uniforms[uniform_proj_mat] = agl_get_uniform_location(ui_program, "proj_mat");
     check_bindings(uniforms, uniform_count);
 
     glGenBuffersARB(1, &vbo);
@@ -186,7 +190,7 @@ static void end_ui()
         {-1.0f,                     1.0f,                      0.0f, 1.0f },
     };
 
-    agl_use_program(program);
+    agl_use_program(ui_program);
     glUniform1iARB(uniforms[uniform_tex], 0);
     glUniformMatrix4fvARB(uniforms[uniform_proj_mat], 1, GL_FALSE, &proj_mat[0][0]);
     glBindVertexArray(vao);

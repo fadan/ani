@@ -127,7 +127,7 @@ static void win32_update_audio_buffer(Win32Audio *audio, ulong lock_offset, u32 
     }
 }
 
-static void win32_update_audio(Win32State *state, Win32Audio *audio)
+static void win32_update_audio(Win32State *state, Win32Audio *audio, ProgramMemory *memory)
 {
     // NOTE(dan): capture
 
@@ -160,7 +160,7 @@ static void win32_update_audio(Win32State *state, Win32Audio *audio)
                 }
             }
 
-            state->record_audio(&state->permanent_memory, buffer, size1 + size2);
+            state->record_audio(memory, buffer, size1 + size2);
             end_temp_memchunk(temp);
 
             audio->next_capture_offset += size1 + size2;
@@ -213,7 +213,7 @@ static void win32_update_audio(Win32State *state, Win32Audio *audio)
         }
 
         u32 num_samples = write_size / audio->block_size;
-        state->mix_audio(&state->permanent_memory, audio->num_channels, audio->bits_per_sample, audio->samples_per_sec,
+        state->mix_audio(memory, audio->num_channels, audio->bits_per_sample, audio->samples_per_sec, 
                          audio->buffer, num_samples);
         win32_update_audio_buffer(audio, lock_offset, write_size);
     }

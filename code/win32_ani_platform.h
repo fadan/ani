@@ -37,7 +37,7 @@ struct Win32State
     b32 initialized;
 
     Memchunk platform_memory;
-    Memchunk permanent_memory;
+    Memchunk program_memory;
 
     MixAudioProc        *mix_audio;
     RecordAudioProc     *record_audio;

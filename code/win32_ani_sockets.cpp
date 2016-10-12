@@ -1,12 +1,14 @@
 #include <winsock2.h>
 
-static PLATFORM_SOCKET_INIT_PROC(win32_socket_init)
+static b32 win32_socket_init()
 {
     WORD version_requested = MAKEWORD(2, 2);
-    WSADATA data;
 
-    b32 result = WSAStartup(version_requested, &data) != NO_ERROR;
-    return result;
+    WSADATA data;
+    b32 return_code = WSAStartup(version_requested, &data) != NO_ERROR;
+
+    b32 initialized = (0 == return_code);
+    return initialized;
 }
 
 static PLATFORM_SOCKET_CREATE_UDP_PROC(win32_socket_create_udp)
@@ -60,19 +62,7 @@ static PLATFORM_SOCKET_CLOSE_PROC(win32_socket_close)
     closesocket(socket);
 }
 
-static PLATFORM_SOCKET_SHUTDOWN_PROC(win32_socket_shutdown)
+static void win32_socket_shutdown()
 {
     WSACleanup();
-}
-
-inline PlatformSocketsApi win32_get_sockets_api()
-{
-    PlatformSocketsApi api = {0};
-    api.init        = win32_socket_init;
-    api.create_udp  = win32_socket_create_udp;
-    api.send        = win32_socket_send;
-    api.recv        = win32_socket_recv;
-    api.close       = win32_socket_close;
-    api.shutdown    = win32_socket_shutdown;
-    return api;
 }

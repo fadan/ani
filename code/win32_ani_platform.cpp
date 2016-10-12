@@ -7,7 +7,7 @@
 #endif
 
 #define PLATFORM_MEMORY_SIZE    8*MB
-#define PERMANENT_MEMORY_SIZE   8*MB
+#define PROGRAM_MEMORY_SIZE     8*MB
 
 #define UPDATE_HZ       60
 #define TIMESTEP_SEC    (1.0f / UPDATE_HZ)
@@ -72,14 +72,18 @@ static void win32_init_window(Win32Window *window)
 
 static void win32_init_state(Win32State *state)
 {
-    usize total_memory_size = PLATFORM_MEMORY_SIZE + PERMANENT_MEMORY_SIZE;
+    state->mix_audio         = mix_audio;
+    state->record_audio      = record_audio;
+    state->update_and_render = update_and_render;
+
+    usize total_memory_size = PLATFORM_MEMORY_SIZE + PROGRAM_MEMORY_SIZE;
     void *memory = win32_allocate(total_memory_size, MEMORY_BASE_ADDRESS);
 
     Memchunk total_memory;
     init_memchunk(&total_memory, memory, total_memory_size);
 
     sub_memchunk(&state->platform_memory, &total_memory, PLATFORM_MEMORY_SIZE);
-    sub_memchunk(&state->permanent_memory, &total_memory, PERMANENT_MEMORY_SIZE);
+    sub_memchunk(&state->program_memory, &total_memory, PROGRAM_MEMORY_SIZE);
 
     state->initialized = (memory != 0);
 }
@@ -224,30 +228,16 @@ static void win32_update_input(Win32Window *window, Input *current_input, Input 
     current_input->mouse_y = (f32)mouse_pos.y + 40; // TODO(dan): fix this
 }
 
-void ods(char *fmt, ...)
-{
-   char buffer[1000];
-   va_list va;
-   va_start(va, fmt);
-   vsprintf(buffer, fmt, va);
-   va_end(va);
-
-   OutputDebugString(buffer);
-}
-
 int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_show)
 {
     Win32State state = {0};
-    state.mix_audio         = mix_audio;
-    state.record_audio      = record_audio;
-    state.update_and_render = update_and_render;
     win32_init_state(&state);
 
     Win32Window window = {0};
     window.title   = "Ani";
     window.width   = 1280;
     window.height  = 720;
-    window.wndproc = (WNDPROC)win32_window_proc;
+    window.wndproc = win32_window_proc;
     win32_init_window(&window);
 
     Win32Audio audio = {0};
@@ -257,25 +247,19 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
     win32_init_audio(&audio, window.wnd);
 
     Input inputs[2] = {0};
-    Input *current_input = &inputs[0];
+    Input *current_input  = &inputs[0];
     Input *previous_input = &inputs[1];
 
-    #define SERVER_IP       IPV4_TO_U32(127, 0, 0, 1)
-    #define SERVER_PORT     30000
-    #define CLIENT_PORT     30001
+    ProgramMemory memory = {0};
+    memory.memchunk = state.program_memory;
+    memory.platform.socket_create_udp = win32_socket_create_udp;
+    memory.platform.socket_send       = win32_socket_send;
+    memory.platform.socket_recv       = win32_socket_recv;
+    memory.platform.socket_close      = win32_socket_close;
 
-    PlatformSocketsApi sockets = win32_get_sockets_api();
+    b32 net_initialized = win32_socket_init();
 
-    Net net = {0};
-    init_net(sockets, &net, &state.platform_memory);
-
-    Connection server = {0};
-    init_server_connection(&server, SERVER_PORT);
-    
-    Connection client = {0};
-    init_client_connection(&client, CLIENT_PORT, SERVER_IP, SERVER_PORT);
-
-    if (window.context_initialized && state.initialized)
+    if (window.context_initialized && state.initialized && net_initialized)
     {
         f32 carried_dt = 0;
         f32 time = 0;
@@ -294,53 +278,15 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
             {
                 carried_dt -= TIMESTEP_SEC;
 
-                //
-
-                {
-                    if (client.state == ConnectionState_Connected && server.state == ConnectionState_Connected)
-                    {
-                        int breakhere = 1;
-                    }
-
-                    if (client.state == ConnectionState_ConnectionFailed)
-                    {
-                        int breakhere = 2;
-                    }
-
-                    char client_packet[] = "client to server";
-                    send_packet(&net, &client, client_packet, array_size(client_packet));
-
-                    char server_packet[] = "server to client";
-                    send_packet(&net, &server, server_packet, array_size(server_packet));
-
-
-                    char packet[256];
-                    i32 packet_size;
-                    while (0 < (packet_size = recv_packet(&net, &client, packet, sizeof(packet))))
-                    {
-                        int breakhere = 3;
-                    }
-
-                    while (0 < (packet_size = recv_packet(&net, &server, packet, sizeof(packet))))
-                    {
-                        int breakhere = 4;
-                    }
-
-                    update_connection(&net, &client, TIMESTEP_SEC);
-                    update_connection(&net, &server, TIMESTEP_SEC);
-                }
-
-                //
-
-                win32_update_input(&window, current_input, previous_input);              
-                win32_update_audio(&state, &audio);
+                win32_update_input(&window, current_input, previous_input);
+                win32_update_audio(&state, &audio, &memory);
 
                 RECT rect;
                 GetWindowRect(window.wnd, &rect);
                 window.width = rect.right - rect.left;
                 window.height = rect.bottom - rect.top;
 
-                state.update_and_render(&state.permanent_memory, current_input, window.width, window.height);
+                state.update_and_render(&memory, current_input, window.width, window.height);
 
                 Input *temp_input = current_input;
                 current_input = previous_input;
@@ -349,7 +295,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char *cmdline, int cmd_
                 SwapBuffers(window.dc);
             }
         }
-    }
 
-    shutdown_net(&net);
+        win32_socket_shutdown();
+    }
 }
